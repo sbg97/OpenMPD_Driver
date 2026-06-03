@@ -32,8 +32,8 @@ protected:
   enum AsierInhoState { INIT = 0, CONNECTED };
   int status;
 
-  // Worker threads: They wait untill notified to update phases, and send an
-  // event back (XXBoardDone_signal) when the update is complete.
+  // Worker threads: They wait untill notified to update phases, and send a
+  // condition variable notification back when the update is complete.
   std::vector<std::unique_ptr<worker_threadData>> boardWorkerData;
 
 public:
@@ -60,8 +60,6 @@ public:
   virtual void turnTransducersOn();
   virtual void turnTransducersOff();
   virtual void disconnect();
-  static void _sendUpdate(FT_HANDLE &board, unsigned char *stream,
-                          size_t numMessages);
 #ifdef _TIME_PROFILING
   virtual void _profileTimes();
 #endif

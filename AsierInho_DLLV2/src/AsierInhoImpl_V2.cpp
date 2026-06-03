@@ -84,8 +84,8 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
   phaseAdjust = new int[256 * numBoards];
   transducerIds = new int[256 * numBoards];
   int *numDiscreteLevels = new int[numBoards];
-  this->numDiscreteLevels =
-      256; // We will set the resolution to the MINIMUM of all board involved
+  // We will set the resolution to the MINIMUM of all board involved
+  this->numDiscreteLevels = 256;
   // 2. Read per-board adjustment parameters and safe them in each worker thread
   // data:
 #ifdef _TIME_PROFILING
@@ -365,24 +365,4 @@ void AsierInhoImpl_V2::disconnect() {
 
   boardWorkerData.clear();
   status = AsierInhoState::INIT;
-}
-
-/**
-        Sends a command to the board to load new phases and amplitudes for its
-   256 transducers.
-*/
-void AsierInhoImpl_V2::_sendUpdate(FT_HANDLE &board, unsigned char *stream,
-                                   size_t numMessages) {
-
-  FT_STATUS ftStatus;
-  DWORD dataWritten;
-  // 4. Send!
-  ftStatus = FT_Write(board, stream,
-                      (DWORD)numMessages * AsierInhoImpl_V2::messageSize,
-                      &dataWritten);
-  if (ftStatus != FT_OK) {
-    sprintf(consoleLineBuffer, "AsierInhoImpl_V2::_sendUpdate error %d\n",
-            ftStatus);
-    printWarning(consoleLineBuffer);
-  }
 }

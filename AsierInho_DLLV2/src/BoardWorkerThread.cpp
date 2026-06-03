@@ -13,7 +13,7 @@ void worker_threadData::worker_BoardUpdater() {
       break;
     }
     // Send update:
-    AsierInhoImpl_V2::_sendUpdate(board, dataStream.data(), numMessagesToSend);
+    sendUpdate(dataStream.data(), numMessagesToSend);
 #ifdef _TIME_PROFILING
     struct timeval curTime;
     curUpdate = (curUpdate + 1) % UPS;
@@ -97,4 +97,23 @@ bool worker_threadData::initFTDevice(bool syncMode) {
   FT_Purge(board, FT_PURGE_RX | FT_PURGE_TX);
   AsierInho_V2::printMessage("USB ports setup\n");
   return true;
+}
+
+/*
+Sends a command to the board to load new phases and amplitudes for its 256
+transducers.
+*/
+void worker_threadData::sendUpdate(unsigned char *stream, size_t numMessages) {
+
+  FT_STATUS ftStatus;
+  DWORD dataWritten;
+  // 4. Send!
+  ftStatus = FT_Write(board, stream,
+                      (DWORD)numMessages * AsierInhoImpl_V2::messageSize,
+                      &dataWritten);
+  if (ftStatus != FT_OK) {
+    sprintf(consoleLineBuffer, "worker_threadData::sendUpdate error %d\n",
+            ftStatus);
+    printWarning(consoleLineBuffer);
+  }
 }
