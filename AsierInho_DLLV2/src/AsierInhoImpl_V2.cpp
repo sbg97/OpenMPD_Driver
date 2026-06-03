@@ -1,8 +1,6 @@
 #include <../AsierInho_DLL/src/ParseBoardConfig.h>
 #include <cstring>
-#include <fstream>
 #include <src/AsierInhoImpl_V2.h>
-#include <sstream>
 #include <unistd.h>
 
 void mySleep(int ms) {
@@ -89,42 +87,20 @@ bool AsierInhoImpl_V2::connect(int bottomBoardID, int topBoardID,
                                int maxNumMessagesToSend) {
   // Configuration data for a simple top-bottom setup.
   int boardIDs[] = {bottomBoardID, topBoardID};
+  // clang-format off
   float matBoardToWorld[32] = {
       /*bottom*/
-      1,
-      0,
-      0,
-      0,
-      0,
-      1,
-      0,
-      0,
-      0,
-      0,
-      1,
-      0,
-      0,
-      0,
-      0,
-      1,
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
       /*top*/
-      -1,
-      0,
-      0,
-      0,
-      0,
-      1,
-      0,
-      0,
-      0,
-      0,
-      -1,
-      0.2388f,
-      0,
-      0,
-      0,
-      1,
+      -1, 0, 0,  0,
+      0,  1, 0,  0,
+      0,  0, -1, 0.2388f,
+      0,  0, 0,  1,
   };
+  // clang-format on
   if (topBoardID != 0) // Support for sigle sided setups
     return connect(2, boardIDs, matBoardToWorld, maxNumMessagesToSend);
   else
@@ -169,7 +145,7 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
     boardWorkerData[b]->curUpdate = 0;
 #endif // END DEBUG
   }
-  delete numDiscreteLevels;
+  delete[] numDiscreteLevels;
 
   // Adjust from (local) transducer IDs [0..255] to global positions in the
   // message
@@ -438,7 +414,7 @@ void AsierInhoImpl_V2::turnTransducersOff() {
   }
   // 2. Send it:
   updateMessage(message);
-  delete message;
+  delete[] message;
 }
 
 void AsierInhoImpl_V2::turnTransducersOn() {
@@ -458,7 +434,7 @@ void AsierInhoImpl_V2::turnTransducersOn() {
   }
   // 2. Send it:
   updateMessage(message);
-  delete message;
+  delete[] message;
 }
 
 /**
