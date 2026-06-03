@@ -366,3 +366,53 @@ void AsierInhoImpl_V2::disconnect() {
   boardWorkerData.clear();
   status = AsierInhoState::INIT;
 }
+
+void AsierInhoImpl_V2::discretizePhases(float *phases,
+                                        unsigned char *discretePhases) {
+  // if (phases == NULL || status != AsierInhoState::CONNECTED)
+  //	return;
+
+  // 1. We traverse each transducer and re-map it to the appropriate trasnducer
+  // index...
+  int numTransducers = totalTransducers();
+
+  for (int index = 0; index < numTransducers; index++) {
+    // We compute its "PIN order" index
+    int PIN_index = transducerIds[index];
+    // We update the phase according to transducer-specific offset (Note the
+    // offsets must be multiplied by PI)
+    float correctedPhase =
+        phases[index] - (float)(phaseAdjust[index] * M_PI / 180.0f);
+    // discretize phase
+    discretePhases[PIN_index] = _discretizePhase(correctedPhase);
+  }
+}
+
+// duty cycle and obtained amplitudes are not linear
+void AsierInhoImpl_V2::discretizeAmplitudes(float *amplitudes,
+                                            unsigned char *discreteAmplitudes) {
+  int numTransducers = totalTransducers();
+  for (int i = 0; i < numTransducers; i++) {
+    unsigned char discreteAmplitude = _discretizeAmplitude(amplitudes[i]);
+    int pinIndex = transducerIds[i];
+    discreteAmplitudes[pinIndex] = discreteAmplitude;
+  }
+}
+unsigned char AsierInhoImpl_V2::_discretizeAmplitude(float amplitude) {
+  float step = (float)((64 * 2.0f / M_PI) * asin(amplitude));
+  return (unsigned char)step;
+}
+
+// changing the duty cycle shifts the phase, which needs to be corrected
+void AsierInhoImpl_V2::correctPhasesShift(unsigned char *discretePhases,
+                                          unsigned char *discreteAmplitudes) {
+  for (int i = 0; i < 512; i++) {
+    unsigned char shift;
+    shift = (64 - discreteAmplitudes[i]) / 2;
+
+    if (discretePhases[i] + shift < 128)
+      discretePhases[i] = discretePhases[i] + shift;
+    else
+      discretePhases[i] = discretePhases[i] + shift - 128;
+  }
+}

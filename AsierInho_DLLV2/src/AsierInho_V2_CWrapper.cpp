@@ -101,3 +101,34 @@ bool AsierInho_CWrapper_connect(AsierInho_V2_Handler h, int numBoards,
 void AsierInho_CWrapper_disconnect(AsierInho_V2_Handler h) {
   ((AsierInho_V2::AsierInhoBoard_V2 *)h)->disconnect();
 }
+
+void AsierInho_CWrapper_discretizePhases(AsierInho_V2_Handler h, float *phases,
+                                         unsigned char *discretePhases) {
+  ((AsierInho_V2::AsierInhoBoard_V2 *)h)
+      ->discretizePhases(phases, discretePhases);
+}
+
+unsigned char AsierInho_CWrapper_discretizePhase(AsierInho_V2_Handler h,
+                                                 float phase) {
+  return ((AsierInho_V2::AsierInhoBoard_V2 *)h)->_discretizePhase(phase);
+}
+
+void AsierInho_CWrapper_discretizeAmplitudes(
+    AsierInho_V2_Handler h, float *amplitudes,
+    unsigned char *discreteAmplitudes) {
+  ((AsierInho_V2::AsierInhoBoard_V2 *)h)
+      ->discretizeAmplitudes(amplitudes, discreteAmplitudes);
+}
+
+unsigned char AsierInho_CWrapper_discretizeAmplitude(AsierInho_V2_Handler h,
+                                                     float amplitude) {
+  return ((AsierInho_V2::AsierInhoBoard_V2 *)h)
+      ->_discretizeAmplitude(amplitude);
+}
+
+void AsierInho_CWrapper_correctPhasesShift(AsierInho_V2_Handler h,
+                                           unsigned char *discretePhases,
+                                           unsigned char *discreteAmplitudes) {
+  ((AsierInho_V2::AsierInhoBoard_V2 *)h)
+      ->correctPhasesShift(discretePhases, discreteAmplitudes);
+}

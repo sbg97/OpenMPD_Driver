@@ -140,6 +140,44 @@ public:
 #ifdef _TIME_PROFILING
   virtual void _profileTimes() = 0;
 #endif
+
+  // METHODS TO USE IF COMPUTING SOUNDFIELDS IN YOUR OWN:
+  /**
+          This board uses discrete representations for the phases.
+          That is, while our pahses can be any real number (we usually think of
+     them in the range [0..2PI)), the board only uses 128 discrete values. This
+     method computes the set of discretized phases from an input set of (real)
+     phases. The number of elements in the array corresponds to the number of
+     transducers in AsierInho. NOTE: This is done authomatically by the GPU
+     solver (GS-PAT), so this method should only be called for clients computing
+     sound fields on their own
+  */
+  virtual void discretizePhases(float *phases,
+                                unsigned char *discretePhases) = 0;
+  virtual unsigned char _discretizePhase(float phase) = 0;
+  /**
+          This board uses discrete representations for the amplitudees.
+          That is, while our amplitudes can be any real number (we usually think
+     of them in the range [0..1)), the board only uses 64 discrete values (half
+     the phase resolution). This method computes the set of discretized
+     amplitudes from an input set of (real) amplitudes. The number of elements
+     in the array corresponds to the number of transducers in AsierInho. NOTE:
+     This is done authomatically by the GPU solver (GS-PAT), so this method
+     should only be called for clients computing sound fields on their own
+  */
+  virtual void discretizeAmplitudes(float *amplitudes,
+                                    unsigned char *discreteAmplitudes) = 0;
+  virtual unsigned char _discretizeAmplitude(float amplitude) = 0;
+
+  /**
+          Using variable amplitudes (different to 1) effectively shifts the
+     phases. This method must be called once phases and amplitudes have been
+     discretised to avoid this shifting. NOTE: This is done authomatically by
+     the GPU solver (GS-PAT), so this method should only be called for clients
+     computing sound fields on their own
+  */
+  virtual void correctPhasesShift(unsigned char *discretePhases,
+                                  unsigned char *discreteAmplitudes) = 0;
 };
 
 _AsierInho_Export_V2 AsierInhoBoard_V2 *createAsierInho();

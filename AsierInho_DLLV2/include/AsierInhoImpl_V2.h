@@ -60,6 +60,13 @@ public:
   virtual void turnTransducersOn();
   virtual void turnTransducersOff();
   virtual void disconnect();
+  virtual void discretizePhases(float *phases, unsigned char *discretePhases);
+  virtual unsigned char _discretizePhase(float phase);
+  virtual void discretizeAmplitudes(float *amplitudes,
+                                    unsigned char *discreteAmplitudes);
+  virtual unsigned char _discretizeAmplitude(float amplitude);
+  virtual void correctPhasesShift(unsigned char *discretePhases,
+                                  unsigned char *discreteAmplitudes);
 #ifdef _TIME_PROFILING
   virtual void _profileTimes();
 #endif

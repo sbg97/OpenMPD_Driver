@@ -51,5 +51,21 @@ _AsierInho_Export_V2 bool AsierInho_CWrapper_connect(AsierInho_V2_Handler h,
                                                      int *boardIDs,
                                                      float *matBoardToWorld4x4);
 _AsierInho_Export_V2 void AsierInho_CWrapper_disconnect(AsierInho_V2_Handler h);
+
+_AsierInho_Export_V2 void
+AsierInho_CWrapper_discretizePhases(AsierInho_V2_Handler h, float *phases,
+                                    unsigned char *discretePhases);
+_AsierInho_Export_V2 unsigned char
+AsierInho_CWrapper_discretizePhase(AsierInho_V2_Handler h, float phase);
+_AsierInho_Export_V2 void
+AsierInho_CWrapper_discretizeAmplitudes(AsierInho_V2_Handler h,
+                                        float *amplitudes,
+                                        unsigned char *discreteAmplitudes);
+_AsierInho_Export_V2 unsigned char
+AsierInho_CWrapper_discretizeAmplitude(AsierInho_V2_Handler h, float amplitude);
+_AsierInho_Export_V2 void
+AsierInho_CWrapper_correctPhasesShift(AsierInho_V2_Handler h,
+                                      unsigned char *discretePhases,
+                                      unsigned char *discreteAmplitudes);
 };
 #endif
