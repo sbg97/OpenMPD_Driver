@@ -4,8 +4,11 @@
 #include "AsierInho_V2_Prerequisites.h"
 #include <condition_variable>
 #include <math.h>
+#include <memory>
 #include <mutex>
 #include <stdio.h>
+#include <string>
+#include <thread>
 #include <vector>
 #define _USE_MATH_DEFINES
 #include <ftd2xx.h>
@@ -14,19 +17,28 @@ using namespace AsierInho_V2;
 
 struct worker_threadData {
   FT_HANDLE board; // Port to write to
-  char *boardSN;
+  std::string boardSN;
   bool running = true;
   std::mutex currentlyDoingWork;
   std::condition_variable threadBlocker;
   std::vector<unsigned char>
-      dataStream; // We read the phases/amplitudes to send from this buffer.
+      dataStream; // We read the phasemaphores instead of mutexes?ses/amplitudes
+                  // to send from this buffer.
   int numMessagesToSend;
+  std::thread workerThread;
 #ifdef _TIME_PROFILING // DEBUG: Add time profiling fields:
   static const int UPS = 8000;
   int curUpdate;
   float timestamps[UPS];
   struct timeval referenceTime;
 #endif
+  worker_threadData();
+  ~worker_threadData();
+  worker_threadData(worker_threadData &&other) = delete;
+  worker_threadData(const worker_threadData &) = delete;
+  worker_threadData &operator=(const worker_threadData &) = delete;
+  bool initFTDevice(bool syncMode);
+  void worker_BoardUpdater();
 };
 
 class AsierInhoImpl_V2 : public AsierInhoBoard_V2 {
@@ -51,8 +63,7 @@ protected:
 
   // Worker threads: They wait untill notified to update phases, and send an
   // event back (XXBoardDone_signal) when the update is complete.
-  std::vector<pthread_t> boardWorkerThreads; // topBoardThread;
-  std::vector<worker_threadData *> boardWorkerData;
+  std::vector<std::unique_ptr<worker_threadData>> boardWorkerData;
 
 public:
   AsierInhoImpl_V2();
@@ -90,8 +101,6 @@ protected:
                            int *transducerIds, int *phaseAdjust,
                            float *amplitudeAdjust, int *numDiscreteLevels,
                            worker_threadData *thread_data);
-  bool initFTDevice(FT_HANDLE &fthandle, char *serialNumber,
-                    bool syncMode = false);
 };
 
 #endif

@@ -1,6 +1,7 @@
 #include "AsierInhoImpl_V2.h"
 #include "ParseBoardConfig.h"
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <unistd.h>
 
@@ -17,35 +18,97 @@ static char consoleLineBuffer[512];
 /**
         Method run by each of the wroker threads
 */
-void *worker_BoardUpdater(void *threadData) {
-  // we read ou configuration
-  struct worker_threadData *data = (struct worker_threadData *)threadData;
-
-  while (data->running) {
+void worker_threadData::worker_BoardUpdater() {
+  while (running) {
     // lock, then unlock the mutex, then relock it again once either
     // `numMessagesToSend` is not zero, or we are trying to disconnect
-    std::unique_lock<std::mutex> lock(data->currentlyDoingWork);
-    data->threadBlocker.wait(
-        lock, [&data] { return data->numMessagesToSend || !data->running; });
-    if (!data->running) {
+    std::unique_lock<std::mutex> lock(currentlyDoingWork);
+    threadBlocker.wait(lock, [this] { return numMessagesToSend || !running; });
+    if (!running) {
       break;
     }
     // Send update:
-    AsierInhoImpl_V2::_sendUpdate(data->board, data->dataStream.data(),
-                                  data->numMessagesToSend);
+    AsierInhoImpl_V2::_sendUpdate(board, dataStream.data(), numMessagesToSend);
 #ifdef _TIME_PROFILING
     struct timeval curTime;
-    data->curUpdate = (data->curUpdate + 1) % data->UPS;
+    curUpdate = (curUpdate + 1) % UPS;
     gettimeofday(&curTime, 0x0);
-    data->timestamps[data->curUpdate] =
-        computeTimeElapsed(data->referenceTime, curTime);
+    timestamps[curUpdate] = computeTimeElapsed(referenceTime, curTime);
 #endif
     // Send notification signal
-    data->numMessagesToSend = 0;
-    data->threadBlocker.notify_all();
+    numMessagesToSend = 0;
+    threadBlocker.notify_all();
   }
   AsierInho_V2::printMessage("AsierInho Worker finished!\n");
-  return 0;
+}
+
+worker_threadData::worker_threadData()
+    : workerThread(&worker_threadData::worker_BoardUpdater, this) {
+  running = initFTDevice(false);
+}
+
+worker_threadData::~worker_threadData() {
+  // wait until the thread is done doing what it's in the middle of doing,
+  // then tell it to turn off
+  std::unique_lock<std::mutex> lock(currentlyDoingWork);
+  running = false;
+  threadBlocker.notify_all();
+
+  workerThread.join();
+  FT_Close(board);
+}
+
+// To achieve 10kHz, I need to use the FTD2XX driver. USBs are not recognised as
+// a COM port any more...
+bool worker_threadData::initFTDevice(bool syncMode) {
+
+  FT_STATUS status;
+  status = FT_OpenEx(const_cast<char *>(boardSN.c_str()),
+                     FT_OPEN_BY_SERIAL_NUMBER, &board);
+  if (status != FT_OK) {
+    if (status == FT_INVALID_HANDLE)
+      sprintf(
+          consoleLineBuffer,
+          "Could not open USB port, status not ok (%d - invalid handle...)\n",
+          status);
+    if (status == FT_DEVICE_NOT_FOUND)
+      sprintf(consoleLineBuffer,
+              "Could not open USB port, open status not ok (%d - device "
+              "not found...)\n",
+              status);
+    if (status == FT_DEVICE_NOT_OPENED)
+      sprintf(consoleLineBuffer,
+              "Could not open USB port, open status not ok (%d - device "
+              "not opened...)\n",
+              status);
+    AsierInho_V2::printWarning(consoleLineBuffer);
+    return false;
+  }
+  AsierInho_V2::printMessage("USB ports open\n");
+  status = FT_ResetDevice(board);
+  if (status != FT_OK) {
+    sprintf(consoleLineBuffer, "Could not reset USB ports. Reset status %d\n",
+            status);
+    AsierInho_V2::printWarning(consoleLineBuffer);
+    return false;
+  }
+
+  // set the transfer mode as Syncronsou mode
+  if (syncMode) {
+    UCHAR Mask = 0xFF; // Set data bus to outputs
+    UCHAR mode_rst = 0;
+    UCHAR mode_sync = 0x40; // Configure FT2232H into 0x40 Sync FIFO mode
+    FT_SetBitMode(board, Mask, mode_rst); // reset MPSSE
+    FT_SetBitMode(board, Mask,
+                  mode_sync); // configure FT2232H into Sync FIFO mode
+  }
+
+  // set the latency timer and USB parameters
+  FT_SetLatencyTimer(board, 2);
+  FT_SetUSBParameters(board, 0x10000, 0x10000);
+  FT_Purge(board, FT_PURGE_RX | FT_PURGE_TX);
+  AsierInho_V2::printMessage("USB ports setup\n");
+  return true;
 }
 
 #ifdef _TIME_PROFILING
@@ -76,14 +139,7 @@ void AsierInhoImpl_V2::_profileTimes() {
 
 AsierInhoImpl_V2::AsierInhoImpl_V2() : AsierInhoBoard_V2(), status(INIT) {}
 
-AsierInhoImpl_V2::~AsierInhoImpl_V2() {
-  disconnect();
-  // delete topData;
-  // delete bottomData;
-  for (int b = 0; b < boardWorkerData.size(); b++)
-    delete boardWorkerData[b];
-  boardWorkerData.clear();
-}
+AsierInhoImpl_V2::~AsierInhoImpl_V2() {}
 
 /**
         Connects to the board, using the board type and ID specified.
@@ -134,13 +190,14 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
 #endif
   for (int b = 0; b < numBoards; b++) {
     this->boardIDs.push_back(boardIDs[b]);
-    boardWorkerData.push_back(new struct worker_threadData);
-    boardWorkerData[b]->dataStream.reserve(messageSize * maxNumMessagesToSend);
+    boardWorkerData.push_back(std::make_unique<worker_threadData>());
+    boardWorkerData.back()->dataStream.reserve(messageSize *
+                                               maxNumMessagesToSend);
     readBoardParameters(
         boardIDs[b], &(matToWorld[16 * b]), &(transducerPositions[3 * 256 * b]),
         &(transducerNormals[3 * 256 * b]), &(transducerIds[256 * b]),
         &(phaseAdjust[256 * b]), &(amplitudeAdjust[256 * b]),
-        &numDiscreteLevels[b], (boardWorkerData[b]));
+        &numDiscreteLevels[b], boardWorkerData.back().get());
     if (numDiscreteLevels[b] < this->numDiscreteLevels)
       this->numDiscreteLevels = numDiscreteLevels[b];
 #ifdef _TIME_PROFILING // DEBUG: Add time profiling fields:
@@ -158,38 +215,33 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
         this->transducerIds[t + b * 256] += b * 256;
   }
   // 3. Connect to each of the boards:
-  if (status == AsierInhoState::INIT) {
-    bool allConnected = true;
-    int boardsConnected;
-    for (boardsConnected = 0; boardsConnected < numBoards && allConnected;
-         boardsConnected++) {
-      allConnected &=
-          initFTDevice((boardWorkerData[boardsConnected]->board),
-                       boardWorkerData[boardsConnected]->boardSN, false);
-    }
-
-    if (allConnected) {
-      status = AsierInhoState::CONNECTED;
-      for (int b = 0; b < numBoards; b++) {
-        pthread_attr_t attrs;
-        pthread_attr_init(&attrs);
-        pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_JOINABLE);
-        pthread_t thread;
-        boardWorkerThreads.push_back(thread);
-        pthread_create(&boardWorkerThreads[b], &attrs, &worker_BoardUpdater,
-                       ((void *)boardWorkerData[b]));
-      }
-      mySleep(100);
-      AsierInho_V2::printMessage("AsierInho_V2 connected succesfully\n");
-      return true;
-    } else {
-      // Destroy connections created? (0..boardConnected)
-      AsierInho_V2::printWarning("AsierInho_V2 connection failed\n");
-      return false;
-    }
+  if (status != AsierInhoState::INIT) {
+    AsierInho_V2::printWarning("AsierInho_V2 is already connected\n");
+    return false;
   }
-  AsierInho_V2::printWarning("AsierInho_V2 is already connected\n");
-  return false;
+  bool allConnected = true;
+  for (auto &boardworkerdata : boardWorkerData) {
+    allConnected &= boardworkerdata->running;
+  }
+
+  if (!allConnected) {
+    boardWorkerData.clear();
+    AsierInho_V2::printWarning("AsierInho_V2 connection failed\n");
+    return false;
+  }
+  status = AsierInhoState::CONNECTED;
+  // for (int b = 0; b < numBoards; b++) {
+  //   pthread_attr_t attrs;
+  //   pthread_attr_init(&attrs);
+  //   pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_JOINABLE);
+  //   pthread_t thread;
+  //   boardWorkerThreads.push_back(thread);
+  //   pthread_create(&boardWorkerThreads[b], &attrs, &worker_BoardUpdater,
+  //                  ((void *)boardWorkerData[b]));
+  // }
+  mySleep(100);
+  AsierInho_V2::printMessage("AsierInho_V2 connected succesfully\n");
+  return true;
 }
 
 void AsierInhoImpl_V2::readParameters(float *transducerPositions,
@@ -222,7 +274,7 @@ void AsierInhoImpl_V2::updateBoardPositions(float *matBoardToWorld4x4) {
         boardIDs[b], &(matBoardToWorld4x4[16 * b]),
         &(transducerPositions[3 * 256 * b]), &(transducerNormals[3 * 256 * b]),
         &(transducerIds[256 * b]), &(phaseAdjust[256 * b]),
-        &(amplitudeAdjust[256 * b]), &tmp, (boardWorkerData[b]));
+        &(amplitudeAdjust[256 * b]), &tmp, boardWorkerData[b].get());
   }
 }
 
@@ -234,8 +286,7 @@ void AsierInhoImpl_V2::readBoardParameters(int boardId, float *matToWorld,
                                            int *numDiscreteLevels,
                                            worker_threadData *thread_data) {
   BoardConfig boardConfig = ParseBoardConfig::readParameters(boardId);
-  thread_data->boardSN = new char[strlen(boardConfig.hardwareID) + 1];
-  strcpy(thread_data->boardSN, boardConfig.hardwareID);
+  thread_data->boardSN = boardConfig.hardwareID;
   // 0. Num discrete levels
   *numDiscreteLevels = boardConfig.numDiscreteLevels;
   // 1. Write transducer positions (multiply local pos by matrix):
@@ -267,59 +318,6 @@ void AsierInhoImpl_V2::readBoardParameters(int boardId, float *matToWorld,
   memcpy(phaseAdjust, boardConfig.phaseAdjust, 256 * sizeof(int));
   // 4. Write Amplitude adjustments:
   memcpy(amplitudeAdjust, boardConfig.amplitudeAdjust, 256 * sizeof(float));
-}
-
-// To achieve 10kHz, I need to use the FTD2XX driver. USBs are not recognised as
-// a COM port any more...
-bool AsierInhoImpl_V2::initFTDevice(FT_HANDLE &fthandle, char *serialNumber,
-                                    bool syncMode) {
-
-  FT_STATUS status;
-  status = FT_OpenEx(serialNumber, FT_OPEN_BY_SERIAL_NUMBER, &fthandle);
-  if (status != FT_OK) {
-    if (status == FT_INVALID_HANDLE)
-      sprintf(
-          consoleLineBuffer,
-          "Could not open USB port, status not ok (%d - invalid handle...)\n",
-          status);
-    if (status == FT_DEVICE_NOT_FOUND)
-      sprintf(consoleLineBuffer,
-              "Could not open USB port, open status not ok (%d - device "
-              "not found...)\n",
-              status);
-    if (status == FT_DEVICE_NOT_OPENED)
-      sprintf(consoleLineBuffer,
-              "Could not open USB port, open status not ok (%d - device "
-              "not opened...)\n",
-              status);
-    AsierInho_V2::printWarning(consoleLineBuffer);
-    return false;
-  }
-  AsierInho_V2::printMessage("USB ports open\n");
-  status = FT_ResetDevice(fthandle);
-  if (status != FT_OK) {
-    sprintf(consoleLineBuffer, "Could not reset USB ports. Reset status %d\n",
-            status);
-    AsierInho_V2::printWarning(consoleLineBuffer);
-    return false;
-  }
-
-  // set the transfer mode as Syncronsou mode
-  if (syncMode) {
-    UCHAR Mask = 0xFF; // Set data bus to outputs
-    UCHAR mode_rst = 0;
-    UCHAR mode_sync = 0x40; // Configure FT2232H into 0x40 Sync FIFO mode
-    FT_SetBitMode(fthandle, Mask, mode_rst); // reset MPSSE
-    FT_SetBitMode(fthandle, Mask,
-                  mode_sync); // configure FT2232H into Sync FIFO mode
-  }
-
-  // set the latency timer and USB parameters
-  FT_SetLatencyTimer(fthandle, 2);
-  FT_SetUSBParameters(fthandle, 0x10000, 0x10000);
-  FT_Purge(fthandle, FT_PURGE_RX | FT_PURGE_TX);
-  AsierInho_V2::printMessage("USB ports setup\n");
-  return true;
 }
 
 /*
@@ -461,23 +459,7 @@ void AsierInhoImpl_V2::disconnect() {
   if (status != AsierInhoState::CONNECTED)
     return;
 
-  for (int b = 0; b < numBoards; b++) {
-    // wait until the thread is done doing what it's in the middle of doing,
-    // then tell it to turn off
-    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
-    boardWorkerData[b]->running = false;
-    boardWorkerData[b]->threadBlocker.notify_all();
-  }
-  for (int b = 0; b < numBoards; b++)
-    pthread_join(boardWorkerThreads[b], NULL);
-  // 1. Destroy threads and related resources (e.g. signals)
-  for (int b = 0; b < numBoards; b++) {
-    FT_Close(boardWorkerData[b]->board);
-    delete boardWorkerData[b]->boardSN;
-    delete boardWorkerData[b];
-  }
   boardWorkerData.clear();
-  boardWorkerThreads.clear();
   status = AsierInhoState::INIT;
 }
 
