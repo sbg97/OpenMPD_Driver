@@ -1,6 +1,7 @@
 #include "AsierInhoImpl_V2.h"
 #include "ParseBoardConfig.h"
 #include <cstring>
+#include <mutex>
 #include <unistd.h>
 
 void mySleep(int ms) {
@@ -21,12 +22,17 @@ void *worker_BoardUpdater(void *threadData) {
   struct worker_threadData *data = (struct worker_threadData *)threadData;
 
   while (data->running) {
-    // Wait for our signal
-    pthread_mutex_lock(&data->send_signal);
+    // lock, then unlock the mutex, then relock it again once either
+    // `numMessagesToSend` is not zero, or we are trying to disconnect
+    std::unique_lock<std::mutex> lock(data->currentlyDoingWork);
+    data->threadBlocker.wait(
+        lock, [&data] { return data->numMessagesToSend || !data->running; });
+    if (!data->running) {
+      break;
+    }
     // Send update:
-    AsierInhoImpl_V2::_sendUpdate(data->board, data->dataStream,
+    AsierInhoImpl_V2::_sendUpdate(data->board, data->dataStream.data(),
                                   data->numMessagesToSend);
-    data->numMessagesToSend = 0;
 #ifdef _TIME_PROFILING
     struct timeval curTime;
     data->curUpdate = (data->curUpdate + 1) % data->UPS;
@@ -35,7 +41,8 @@ void *worker_BoardUpdater(void *threadData) {
         computeTimeElapsed(data->referenceTime, curTime);
 #endif
     // Send notification signal
-    pthread_mutex_unlock(&data->done_signal);
+    data->numMessagesToSend = 0;
+    data->threadBlocker.notify_all();
   }
   AsierInho_V2::printMessage("AsierInho Worker finished!\n");
   return 0;
@@ -111,9 +118,6 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
                                int maxNumMessagesToSend) {
   this->numBoards = numBoards;
   this->maxNumMessagesToSend = maxNumMessagesToSend;
-  // 1. Create resources for worker threads:
-  dataStream =
-      new unsigned char[messageSize * numBoards * maxNumMessagesToSend];
   transducerPositions = new float[256 * 3 * numBoards];
   transducerNormals = new float[256 * 3 * numBoards];
   amplitudeAdjust = new float[256 * numBoards];
@@ -131,8 +135,7 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
   for (int b = 0; b < numBoards; b++) {
     this->boardIDs.push_back(boardIDs[b]);
     boardWorkerData.push_back(new struct worker_threadData);
-    boardWorkerData[b]->dataStream =
-        &(dataStream[b * messageSize * maxNumMessagesToSend]);
+    boardWorkerData[b]->dataStream.reserve(messageSize * maxNumMessagesToSend);
     readBoardParameters(
         boardIDs[b], &(matToWorld[16 * b]), &(transducerPositions[3 * 256 * b]),
         &(transducerNormals[3 * 256 * b]), &(transducerIds[256 * b]),
@@ -168,9 +171,6 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
     if (allConnected) {
       status = AsierInhoState::CONNECTED;
       for (int b = 0; b < numBoards; b++) {
-        pthread_mutex_init(&(boardWorkerData[b]->send_signal), NULL);
-        pthread_mutex_lock(&(boardWorkerData[b]->send_signal));
-        pthread_mutex_init(&(boardWorkerData[b]->done_signal), NULL);
         pthread_attr_t attrs;
         pthread_attr_init(&attrs);
         pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_JOINABLE);
@@ -209,24 +209,21 @@ void AsierInhoImpl_V2::readParameters(float *transducerPositions,
 }
 
 void AsierInhoImpl_V2::updateBoardPositions(float *matBoardToWorld4x4) {
-  // Pause worker threads
-  if (status == CONNECTED)
-    for (int b = 0; b < numBoards; b++)
-      pthread_mutex_lock(&(boardWorkerData[b]->done_signal));
-  // Update configuration (we simlpy re-read the config file, applying the new
-  // matrix).
-  int aux; // we do not need to reload the numDiscreteLevels... we will store it
-           // here and ignore this return value
-  for (int b = 0; b < numBoards; b++)
+  if (status != AsierInhoState::CONNECTED)
+    return;
+  for (int b = 0; b < numBoards; b++) {
+    // Wait until worker thread isn't doing anything
+    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
+    // Update configuration (we simlpy re-read the config file, applying the
+    // new matrix).
+    int tmp; // we do not need to reload the numDiscreteLevels... we will
+             // store it here and ignore this return value
     readBoardParameters(
         boardIDs[b], &(matBoardToWorld4x4[16 * b]),
         &(transducerPositions[3 * 256 * b]), &(transducerNormals[3 * 256 * b]),
         &(transducerIds[256 * b]), &(phaseAdjust[256 * b]),
-        &(amplitudeAdjust[256 * b]), &aux, (boardWorkerData[b]));
-  // Unlock worker threads
-  if (status == CONNECTED)
-    for (int b = 0; b < numBoards; b++)
-      pthread_mutex_unlock(&(boardWorkerData[b]->done_signal));
+        &(amplitudeAdjust[256 * b]), &tmp, (boardWorkerData[b]));
+  }
 }
 
 void AsierInhoImpl_V2::readBoardParameters(int boardId, float *matToWorld,
@@ -325,77 +322,97 @@ bool AsierInhoImpl_V2::initFTDevice(FT_HANDLE &fthandle, char *serialNumber,
   return true;
 }
 
+/*
+Sends a message to each connected board.
+Message is an array of messages, each one getting sent to a different board.
+*/
 void AsierInhoImpl_V2::updateMessagePerBoard(unsigned char **message) {
-  // 0. Check status
+  // Doesn't work if there are no worker threads
   if (status != AsierInhoState::CONNECTED)
     return;
-  // Multithreaded version:
-  // Wait for them to finish
-  for (int b = 0; b < numBoards; b++) {
-    pthread_mutex_lock(&(boardWorkerData[b]->done_signal));
-    boardWorkerData[b]->numMessagesToSend = 1;
-    boardWorkerData[b]->dataStream = &(dataStream[b * messageSize]);
-  }
 
-  // Update the buffers:
   for (int b = 0; b < numBoards; b++) {
-    memcpy(boardWorkerData[b]->dataStream, message[b], messageSize);
+    // Wait until thread is not currently doing work and has no work to do
+    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
+    boardWorkerData[b]->threadBlocker.wait(
+        lock, [this, b] { return boardWorkerData[b]->numMessagesToSend == 0; });
+
+    // Update the buffers:
+    boardWorkerData[b]->dataStream.assign(message[b], message[b] + messageSize);
+    boardWorkerData[b]->numMessagesToSend = 1;
   }
   // Send signals to notify worker threads to update phases
   for (int b = 0; b < numBoards; b++)
-    pthread_mutex_unlock(&(boardWorkerData[b]->send_signal));
+    boardWorkerData[b]->threadBlocker.notify_all();
 }
 
+/*
+Sends a message to each connected board.
+`message` is a very long message that gets split up then sent to each board.
+`message` gets split every `messageSize` bytes.
+*/
 void AsierInhoImpl_V2::updateMessage(unsigned char *message) {
-  // 0. Check status
+  // Doesn't work if there are no worker threads
   if (status != AsierInhoState::CONNECTED)
     return;
-  // Multithreaded version:
-  // Wait for them to finish
-  for (int b = 0; b < numBoards; b++) {
-    pthread_mutex_lock(&(boardWorkerData[b]->done_signal));
-    boardWorkerData[b]->numMessagesToSend = 1;
-    boardWorkerData[b]->dataStream = &(dataStream[b * messageSize]);
-  }
 
-  // Update the buffer:
-  memcpy(dataStream, message, messageSize * numBoards);
+  for (int b = 0; b < numBoards; b++) {
+    // Wait until thread is not currently doing work and has no work to do
+    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
+    boardWorkerData[b]->threadBlocker.wait(
+        lock, [this, b] { return boardWorkerData[b]->numMessagesToSend == 0; });
+
+    // Update the buffer:
+    boardWorkerData[b]->dataStream.assign(message + (messageSize * b),
+                                          message + (messageSize * (b + 1)));
+    boardWorkerData[b]->numMessagesToSend = 1;
+  }
 
   // Send signals to notify worker threads to update phases
   for (int b = 0; b < numBoards; b++)
-    pthread_mutex_unlock(&(boardWorkerData[b]->send_signal));
+    boardWorkerData[b]->threadBlocker.notify_all();
 }
 
+/*
+Sends `numMessagesToSend` messages to each connected board.
+`message` is a very long message that gets split up then sent to each board.
+`message` gets split every `messageSize * numMessagesToSend` bytes.
+*/
 void AsierInhoImpl_V2::updateMessages(unsigned char *message,
                                       int numMessagesToSend) {
-  // 0. Check status
+  // Doesn't work if there are no worker threads
   if (status != AsierInhoState::CONNECTED)
     return;
-  if (numMessagesToSend > maxNumMessagesToSend || numMessagesToSend < 1)
+
+  if (numMessagesToSend > maxNumMessagesToSend || numMessagesToSend < 1) {
     AsierInho_V2::printWarning(
         "AsierInho: The driver cannot send the requested number of messages. "
         "Command Ignored.");
-  // Multithreaded version:
-  // Wait for them to finish
-  for (int b = 0; b < numBoards; b++) {
-    pthread_mutex_lock(&(boardWorkerData[b]->done_signal));
-    boardWorkerData[b]->numMessagesToSend = numMessagesToSend;
-    boardWorkerData[b]->dataStream =
-        &(dataStream[b * numMessagesToSend * messageSize]);
+    return;
   }
 
-  // Update the buffer:
-  memcpy(dataStream, message, numBoards * numMessagesToSend * messageSize);
+  for (int b = 0; b < numBoards; b++) {
+    // Wait until thread is not currently doing work and has no work to do
+    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
+    boardWorkerData[b]->threadBlocker.wait(
+        lock, [this, b] { return boardWorkerData[b]->numMessagesToSend == 0; });
+
+    // Update the buffer:
+    boardWorkerData[b]->dataStream.assign(
+        message + (messageSize * numMessagesToSend * b),
+        message + (messageSize * numMessagesToSend * (b + 1)));
+    boardWorkerData[b]->numMessagesToSend = numMessagesToSend;
+  }
 
   // Send signals to notify worker threads to update phases
   for (int b = 0; b < numBoards; b++)
-    pthread_mutex_unlock(&(boardWorkerData[b]->send_signal));
+    boardWorkerData[b]->threadBlocker.notify_all();
 }
 
 /**
-        This method turns the transducers off (so that the board does not heat
-   up/die misserably) The board is still connected, so it can later be used
-   again (e.g. create new traps)
+This method turns the transducers off (so that the board does not heat up/die
+misserably) The board is still connected, so it can later be used again (e.g.
+create new traps)
 */
 void AsierInhoImpl_V2::turnTransducersOff() {
   // 0. Check status
@@ -443,17 +460,18 @@ void AsierInhoImpl_V2::turnTransducersOn() {
 void AsierInhoImpl_V2::disconnect() {
   if (status != AsierInhoState::CONNECTED)
     return;
-  // 0. Notify threads to end and wait for them
+
   for (int b = 0; b < numBoards; b++) {
+    // wait until the thread is done doing what it's in the middle of doing,
+    // then tell it to turn off
+    std::unique_lock<std::mutex> lock(boardWorkerData[b]->currentlyDoingWork);
     boardWorkerData[b]->running = false;
-    pthread_mutex_unlock(&(boardWorkerData[b]->send_signal));
+    boardWorkerData[b]->threadBlocker.notify_all();
   }
   for (int b = 0; b < numBoards; b++)
     pthread_join(boardWorkerThreads[b], NULL);
   // 1. Destroy threads and related resources (e.g. signals)
   for (int b = 0; b < numBoards; b++) {
-    pthread_mutex_destroy(&(boardWorkerData[b]->send_signal));
-    pthread_mutex_destroy(&(boardWorkerData[b]->done_signal));
     FT_Close(boardWorkerData[b]->board);
     delete boardWorkerData[b]->boardSN;
     delete boardWorkerData[b];

@@ -2,8 +2,9 @@
 #define _ASIERINHO_IMPLEMENTATION
 #include "AsierInho_V2.h"
 #include "AsierInho_V2_Prerequisites.h"
+#include <condition_variable>
 #include <math.h>
-#include <pthread.h>
+#include <mutex>
 #include <stdio.h>
 #include <vector>
 #define _USE_MATH_DEFINES
@@ -15,11 +16,10 @@ struct worker_threadData {
   FT_HANDLE board; // Port to write to
   char *boardSN;
   bool running = true;
-  pthread_mutex_t send_signal; // This mutex controls access to our signal.
-  pthread_mutex_t done_signal; // We send this signal, once we are done
-                               // updating.
-  unsigned char
-      *dataStream; // We read the phases/amplitudes to send from this buffer.
+  std::mutex currentlyDoingWork;
+  std::condition_variable threadBlocker;
+  std::vector<unsigned char>
+      dataStream; // We read the phases/amplitudes to send from this buffer.
   int numMessagesToSend;
 #ifdef _TIME_PROFILING // DEBUG: Add time profiling fields:
   static const int UPS = 8000;
@@ -48,11 +48,6 @@ protected:
   std::vector<char *> serialNumbers; // bottomSerialNumber, *topSerialNumber;
   enum AsierInhoState { INIT = 0, CONNECTED };
   int status;
-  // shared resource pointing towards the mesages that the boards need to send
-  // to update the boards.
-  unsigned char
-      *dataStream; // [messageSize*numBoards];		//It can fit up to the
-                   // message to send (phases+amplitudes)
 
   // Worker threads: They wait untill notified to update phases, and send an
   // event back (XXBoardDone_signal) when the update is complete.
