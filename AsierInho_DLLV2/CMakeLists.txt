@@ -7,8 +7,8 @@ set(HEADERS
     include/AsierInho_V2.h
     include/AsierInho_V2_CWrapper.h
     include/AsierInho_V2_Prerequisites.h
-    src/AsierInhoImpl_V2.h
-    ../AsierInho_DLL/src/ParseBoardConfig.h
+    include/AsierInhoImpl_V2.h
+    include/ParseBoardConfig.h
 )
 
 # Create the executable or library
@@ -17,8 +17,6 @@ add_library(AsierInho_DLLV2 SHARED ${SOURCES} ${HEADERS})
 # Add include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../
 )
 
 # Preprocessor definitions

@@ -1,6 +1,6 @@
-#include <../AsierInho_DLL/src/ParseBoardConfig.h>
+#include "AsierInhoImpl_V2.h"
+#include "ParseBoardConfig.h"
 #include <cstring>
-#include <src/AsierInhoImpl_V2.h>
 #include <unistd.h>
 
 void mySleep(int ms) {

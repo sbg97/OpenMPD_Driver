@@ -1,13 +1,13 @@
 #ifndef _ASIERINHO_IMPLEMENTATION
 #define _ASIERINHO_IMPLEMENTATION
-#include <AsierInho_V2.h>
-#include <AsierInho_V2_Prerequisites.h>
+#include "AsierInho_V2.h"
+#include "AsierInho_V2_Prerequisites.h"
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <vector>
 #define _USE_MATH_DEFINES
-#include "ftd2xx.h"
+#include <ftd2xx.h>
 
 using namespace AsierInho_V2;
 
