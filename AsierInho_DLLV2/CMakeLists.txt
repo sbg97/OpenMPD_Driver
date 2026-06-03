@@ -2,12 +2,14 @@ set(SOURCES
     src/AsierInho_V2.cpp
     src/AsierInhoImpl_V2.cpp
     src/AsierInho_V2_CWrapper.cpp
+    src/BoardWorkerThread.cpp
 )
 set(HEADERS
     include/AsierInho_V2.h
     include/AsierInho_V2_CWrapper.h
     include/AsierInho_V2_Prerequisites.h
     include/AsierInhoImpl_V2.h
+    include/BoardWorkerThread.h
     include/ParseBoardConfig.h
 )
 
