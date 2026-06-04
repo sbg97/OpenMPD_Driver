@@ -12,7 +12,6 @@ void worker_threadData::worker_BoardUpdater() {
     // `numMessagesToSend` is not zero, or we are trying to disconnect
     std::unique_lock<std::mutex> lock(currentlyDoingWork);
     threadBlocker.wait(lock, [this] { return numMessagesToSend || !running; });
-    AsierInho_V2::printMessage("AsierInho Worker stopped waiting\n");
     if (!running) {
       break;
     }
