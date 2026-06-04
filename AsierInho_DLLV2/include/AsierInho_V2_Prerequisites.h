@@ -22,7 +22,11 @@
 #if defined(__MINGW32__)
 #define _AsierInho_Export_V2
 #else
+#if defined _WIN32
 #define _AsierInho_Export_V2 __declspec(dllimport)
+#else
+#define _AsierInho_Export_V2
+#endif
 #endif
 #endif
 #define AsierInho_V2_Handler long long
