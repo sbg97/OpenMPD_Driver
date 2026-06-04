@@ -1,5 +1,8 @@
 #include "BoardWorkerThread.h"
 #include "AsierInhoImpl_V2.h"
+
+static char consoleLineBuffer[512];
+
 /**
         Method run by each of the wroker threads
 */
@@ -31,6 +34,13 @@ worker_threadData::worker_threadData(std::string boardSerialNumber)
     : boardSN(boardSerialNumber),
       workerThread(&worker_threadData::worker_BoardUpdater, this) {
   running = initFTDevice(false);
+  if(!running){
+    if(boardSerialNumber.length() > 400){
+      boardSerialNumber = boardSerialNumber.substr(0,399);
+    }
+    sprintf(consoleLineBuffer, "initFTDevice() for boardSN \"%s\" was not successful\n", boardSerialNumber.c_str());
+    printWarning("consoleLineBuffer");
+  }
 }
 
 worker_threadData::~worker_threadData() {
@@ -43,8 +53,6 @@ worker_threadData::~worker_threadData() {
   workerThread.join();
   FT_Close(board);
 }
-
-static char consoleLineBuffer[512];
 
 // To achieve 10kHz, I need to use the FTD2XX driver. USBs are not recognised as
 // a COM port any more...

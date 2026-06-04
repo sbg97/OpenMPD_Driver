@@ -17,9 +17,9 @@ struct worker_threadData {
   std::condition_variable threadBlocker;
   // We read the phases/amplitudes to send from this buffer.
   std::vector<unsigned char> dataStream;
-  int numMessagesToSend;
+  int numMessagesToSend = 0;
   // workerThread must be at the bottom so it gets initialized after running
-  // gets set to true
+  // gets set to true and numMessagesToSend gets set to 0
   std::thread workerThread;
 #ifdef _TIME_PROFILING // DEBUG: Add time profiling fields:
   static const int UPS = 8000;
