@@ -17,7 +17,7 @@ set(HEADERS
 add_library(AsierInho_DLLV2 SHARED ${SOURCES} ${HEADERS})
 
 # Add include directories
-include_directories(
+target_include_directories( AsierInho_DLLV2 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
