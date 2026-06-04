@@ -388,6 +388,24 @@ void AsierInhoImpl_V2::discretizePhases(float *phases,
   }
 }
 
+/**
+	Linear range mapping from our continuous phases [0..2PI) to range [0..32)
+*/
+unsigned char AsierInhoImpl_V2::_discretizePhase(float phase) {
+	static const float TWO_PI = 2 * ((float)M_PI);
+	//Transform phase to [0..2PI] range
+	float mod_phase = fmodf(phase, TWO_PI);
+	if (mod_phase < 0)
+		mod_phase += TWO_PI;
+	// ... and then to a [0..1) range
+	float normalized_Phase = mod_phase / TWO_PI;
+	//Map normal range [0..1) to our discrete range [0..32)
+	//int discrete = (int)roundf(normalized_Phase * 64);
+	int discrete = (int)(normalized_Phase * 128);
+	//Done
+	return (unsigned char)(discrete);
+}
+
 // duty cycle and obtained amplitudes are not linear
 void AsierInhoImpl_V2::discretizeAmplitudes(float *amplitudes,
                                             unsigned char *discreteAmplitudes) {
