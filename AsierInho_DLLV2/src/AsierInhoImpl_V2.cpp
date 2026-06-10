@@ -76,12 +76,6 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
                                int maxNumMessagesToSend) {
   this->numBoards = numBoards;
   this->maxNumMessagesToSend = maxNumMessagesToSend;
-  transducerPositions = new float[256 * 3 * numBoards];
-  transducerNormals = new float[256 * 3 * numBoards];
-  amplitudeAdjust = new float[256 * numBoards];
-  phaseAdjust = new int[256 * numBoards];
-  transducerIds = new int[256 * numBoards];
-  int *numDiscreteLevels = new int[numBoards];
   // We will set the resolution to the MINIMUM of all board involved
   this->numDiscreteLevels = 256;
   // 2. Read per-board adjustment parameters and safe them in each worker thread
@@ -90,6 +84,12 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
   struct timeval reference;
   gettimeofday(&reference, 0x0);
 #endif
+  
+  transducerPositions.assign(256*3*numBoards,0.0);
+  transducerNormals.assign(256*3*numBoards,0.0);
+  amplitudeAdjust.assign(256*numBoards,0.0);
+  phaseAdjust.assign(256*numBoards,0);
+  transducerIds.assign(256*numBoards,0);
   for (int b = 0; b < numBoards; b++) {
     this->boardIDs.push_back(boardIDs[b]);
     BoardConfig boardConfig = ParseBoardConfig::readParameters(boardIDs[b]);
@@ -97,19 +97,20 @@ bool AsierInhoImpl_V2::connect(int numBoards, int *boardIDs, float *matToWorld,
         std::make_unique<worker_threadData>(boardConfig.hardwareID));
     boardWorkerData.back()->dataStream.reserve(messageSize *
                                                maxNumMessagesToSend);
+    
+    int tmp_numDiscreteLevels;
     readBoardParameters(boardIDs[b], &(matToWorld[16 * b]),
                         &(transducerPositions[3 * 256 * b]),
                         &(transducerNormals[3 * 256 * b]),
                         &(transducerIds[256 * b]), &(phaseAdjust[256 * b]),
-                        &(amplitudeAdjust[256 * b]), &numDiscreteLevels[b]);
-    if (numDiscreteLevels[b] < this->numDiscreteLevels)
-      this->numDiscreteLevels = numDiscreteLevels[b];
+                        &(amplitudeAdjust[256 * b]), &tmp_numDiscreteLevels);
+    if (tmp_numDiscreteLevels < this->numDiscreteLevels)
+      this->numDiscreteLevels = tmp_numDiscreteLevels;
 #ifdef _TIME_PROFILING // DEBUG: Add time profiling fields:
     boardWorkerData[b]->referenceTime = reference;
     boardWorkerData[b]->curUpdate = 0;
 #endif // END DEBUG
   }
-  delete[] numDiscreteLevels;
 
   // Adjust from (local) transducer IDs [0..255] to global positions in the
   // message
@@ -153,13 +154,13 @@ void AsierInhoImpl_V2::readParameters(float *transducerPositions,
                                       int *transducerIds, int *phaseAdjust,
                                       float *amplitudeAdjust,
                                       int *numDiscreteLevels) {
-  memcpy(transducerPositions, this->transducerPositions,
+  memcpy(transducerPositions, this->transducerPositions.data(),
          256 * numBoards * 3 * sizeof(float));
-  memcpy(transducerNormals, this->transducerNormals,
+  memcpy(transducerNormals, this->transducerNormals.data(),
          256 * numBoards * 3 * sizeof(float));
-  memcpy(transducerIds, this->transducerIds, 256 * numBoards * sizeof(int));
-  memcpy(phaseAdjust, this->phaseAdjust, 256 * numBoards * sizeof(int));
-  memcpy(amplitudeAdjust, this->amplitudeAdjust,
+  memcpy(transducerIds, this->transducerIds.data(), 256 * numBoards * sizeof(int));
+  memcpy(phaseAdjust, this->phaseAdjust.data(), 256 * numBoards * sizeof(int));
+  memcpy(amplitudeAdjust, this->amplitudeAdjust.data(),
          256 * numBoards * sizeof(float));
   *numDiscreteLevels = this->numDiscreteLevels;
 }
@@ -320,18 +321,14 @@ void AsierInhoImpl_V2::turnTransducersOff() {
     return;
 
   // 1. Set all phases and amplitudes to "0"== OFF and send!
-  unsigned char *message = new unsigned char[512 * numBoards];
-  memset(message, 0,
-         512 * numBoards *
-             sizeof(unsigned char)); // Set all phases and amplitudes.
+  std::vector<unsigned char> message(512 * numBoards, 0); // Set all phases and amplitudes.
   for (int b = 0; b < numBoards; b++) {
-    message[0 + 512 * b] = 0 + 128; // Set flag indicating new update (>128)
-    message[25 + 512 * b] = 128; // Set flag indicating to change the LED colour
+    message[0 + 512 * b] |= 0x80; // Set flag indicating new update (>128)
+    message[25 + 512 * b] |= 0x80; // Set flag indicating to change the LED colour
                                  // (turn off in this case)
   }
   // 2. Send it:
-  updateMessage(message);
-  delete[] message;
+  updateMessage(message.data());
 }
 
 void AsierInhoImpl_V2::turnTransducersOn() {
@@ -340,18 +337,14 @@ void AsierInhoImpl_V2::turnTransducersOn() {
     return;
 
   // 1. Set all phases and amplitudes to "0"== OFF and send!
-  unsigned char *message = new unsigned char[512 * numBoards];
-  memset(message, 64,
-         512 * numBoards *
-             sizeof(unsigned char)); // Set all phases and amplitudes.
+  std::vector<unsigned char> message(512 * numBoards, 64); // Set all phases and amplitudes.
   for (int b = 0; b < numBoards; b++) {
-    message[0 + 512 * b] = 64 + 128;  // Set flag indicating new update (>128)
-    message[25 + 512 * b] = 64 + 128; // Set flag indicating to change the LED
+    message[0 + 512 * b] |= 0x80;  // Set flag indicating new update (>128)
+    message[25 + 512 * b] |= 0x80; // Set flag indicating to change the LED
                                       // colour (turn off in this case)
   }
   // 2. Send it:
-  updateMessage(message);
-  delete[] message;
+  updateMessage(message.data());
 }
 
 /**

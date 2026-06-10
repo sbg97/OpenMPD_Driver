@@ -23,11 +23,11 @@ protected:
   int numDiscreteLevels;
   int maxNumMessagesToSend;
   // Callibration parameters...
-  int *transducerIds;         // [256 * numBoards];
-  int *phaseAdjust;           // [256 * numBoards];
-  float *transducerPositions; //[3*256 * numBoards]
-  float *transducerNormals;   //[3*256 * numBoards]
-  float *amplitudeAdjust;
+  std::vector<int> transducerIds;         // [256 * numBoards];
+  std::vector<int> phaseAdjust;           // [256 * numBoards];
+  std::vector<float> transducerPositions; //[3*256 * numBoards]
+  std::vector<float> transducerNormals;   //[3*256 * numBoards]
+  std::vector<float> amplitudeAdjust;
   std::vector<char *> serialNumbers; // bottomSerialNumber, *topSerialNumber;
   enum AsierInhoState { INIT = 0, CONNECTED };
   int status;
