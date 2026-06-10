@@ -1,4 +1,5 @@
 #include "BoardWorkerThread.h"
+
 #include "AsierInhoImpl_V2.h"
 
 static char consoleLineBuffer[512];
@@ -34,12 +35,14 @@ worker_threadData::worker_threadData(std::string boardSerialNumber)
     : boardSN(boardSerialNumber),
       workerThread(&worker_threadData::worker_BoardUpdater, this) {
   running = initFTDevice(false);
-  if(!running){
-    if(boardSerialNumber.length() > 400){
-      boardSerialNumber = boardSerialNumber.substr(0,399);
+  if (!running) {
+    if (boardSerialNumber.length() > 400) {
+      boardSerialNumber = boardSerialNumber.substr(0, 399);
     }
-    sprintf(consoleLineBuffer, "initFTDevice() for boardSN \"%s\" was not successful\n", boardSerialNumber.c_str());
-    printWarning("consoleLineBuffer");
+    sprintf(consoleLineBuffer,
+            "initFTDevice() for boardSN \"%s\" was not successful\n",
+            boardSerialNumber.c_str());
+    printWarning(consoleLineBuffer);
   }
 }
 
@@ -59,9 +62,8 @@ worker_threadData::~worker_threadData() {
 // To achieve 10kHz, I need to use the FTD2XX driver. USBs are not recognised as
 // a COM port any more...
 bool worker_threadData::initFTDevice(bool syncMode) {
-
   FT_STATUS status;
-  status = FT_OpenEx(const_cast<char *>(boardSN.c_str()),
+  status = FT_OpenEx(const_cast<char*>(boardSN.c_str()),
                      FT_OPEN_BY_SERIAL_NUMBER, &board);
   if (status != FT_OK) {
     if (status == FT_INVALID_HANDLE)
@@ -92,13 +94,13 @@ bool worker_threadData::initFTDevice(bool syncMode) {
   }
 
   // set the transfer mode as Syncronsou mode
+  UCHAR Mask = 0xFF;  // Set data bus to outputs
+  UCHAR mode_rst = 0;
+  FT_SetBitMode(board, Mask, mode_rst);  // reset MPSSE
   if (syncMode) {
-    UCHAR Mask = 0xFF; // Set data bus to outputs
-    UCHAR mode_rst = 0;
-    UCHAR mode_sync = 0x40; // Configure FT2232H into 0x40 Sync FIFO mode
-    FT_SetBitMode(board, Mask, mode_rst); // reset MPSSE
+    UCHAR mode_sync = 0x40;
     FT_SetBitMode(board, Mask,
-                  mode_sync); // configure FT2232H into Sync FIFO mode
+                  mode_sync);  // configure FT2232H into Sync FIFO mode
   }
 
   // set the latency timer and USB parameters
@@ -113,8 +115,7 @@ bool worker_threadData::initFTDevice(bool syncMode) {
 Sends a command to the board to load new phases and amplitudes for its 256
 transducers.
 */
-void worker_threadData::sendUpdate(unsigned char *stream, size_t numMessages) {
-
+void worker_threadData::sendUpdate(unsigned char* stream, size_t numMessages) {
   FT_STATUS ftStatus;
   DWORD dataWritten;
   // 4. Send!

@@ -13,8 +13,6 @@ void mySleep(int ms) {
 #endif
 }
 
-static char consoleLineBuffer[512];
-
 #ifdef _TIME_PROFILING
 void AsierInhoImpl_V2::_profileTimes() {
   // Lock all boards:
