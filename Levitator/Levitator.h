@@ -2,6 +2,7 @@
 #include <AsierInho_V2.h>
 #include <stdio.h>
 #include <stdio.h>
+#include <vector>
 
 class Levitator {
 	
@@ -11,17 +12,17 @@ class Levitator {
 	int numTransducers;
 	bool print;
 
-	float* transducerPositions;
-	float* transducerNormals;
-	float* amplitudeAdjust;
-	int* mappings;
-	int* phaseDelays;
+	std::vector<float> transducerPositions;
+	std::vector<float> transducerNormals;
+	std::vector<float> amplitudeAdjust;
+	std::vector<int> mappings;
+	std::vector<int> phaseDelays;
 	int numDiscreteLevels;
 	int num_geometries;
 	int update_rate;
 
-	unsigned char* phases_disc;
-	unsigned char* amplitudes_disc;
+	std::vector<unsigned char> phases_disc;
+	std::vector<unsigned char> amplitudes_disc;
 
 
 public:
@@ -36,5 +37,5 @@ public:
 	int setFrameRate(int frameRate);
 
 	int getNumTransducers() { return this->numTransducers; };
-	float* getTransducerPositions() { return this->transducerPositions; };
+	std::vector<float> getTransducerPositions() { return this->transducerPositions; };
 };

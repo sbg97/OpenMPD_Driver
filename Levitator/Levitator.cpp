@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 void printV2(const char* str) {
 	printf("%s\n", str);
@@ -19,18 +20,18 @@ namespace microTimer {
 		return time_in_micros - baseTime;
 	}
 
-	static void uWait(useconds_t waitTime) {
-		usleep(waitTime);
-	}
+	// static void uWait(useconds_t waitTime) {
+	// 	usleep(waitTime);
+	// }
 
-	static void keepUpdatePeriod(unsigned long updatePeriod) {
-		static unsigned long prevTime = 0;
-		unsigned long currentTime = microTimer::uGetTime();
-		while (currentTime - prevTime < updatePeriod) {
-			currentTime = microTimer::uGetTime();
-		}
-		prevTime = currentTime;
-	}
+	// static void keepUpdatePeriod(unsigned long updatePeriod) {
+	// 	static unsigned long prevTime = 0;
+	// 	unsigned long currentTime = microTimer::uGetTime();
+	// 	while (currentTime - prevTime < updatePeriod) {
+	// 		currentTime = microTimer::uGetTime();
+	// 	}
+	// 	prevTime = currentTime;
+	// }
 };
 
 
@@ -59,20 +60,16 @@ int Levitator::init_driver() {
 	if (!driver->connect(numBoards, boardIDs, matBoardToWorld))
 		printf("Failed to connect to board. \n");
 	
+	phases_disc.assign(256 * numBoards, 0);
+	amplitudes_disc.assign(256 * numBoards, 0);
+
 	//Read parameters to be used for the solver
-	transducerPositions = new float[numTransducers * 3];
-	transducerNormals = new float[numTransducers * 3];
-	amplitudeAdjust = new float[numTransducers];
-	mappings = new int[numTransducers];
-	phaseDelays = new int[numTransducers];
-
-	phases_disc = new unsigned char[256 * numBoards];
-	amplitudes_disc = new unsigned char[256 * numBoards];
-	memset(&phases_disc[0], 0, 256 * numBoards * sizeof(unsigned char));
-	memset(&amplitudes_disc[0], 0, 256 * numBoards * sizeof(unsigned char));
-
-
-	driver->readParameters(transducerPositions, transducerNormals, mappings, phaseDelays, amplitudeAdjust, &numDiscreteLevels);
+	transducerPositions.assign(numTransducers * 3, 0);
+	transducerNormals.assign(numTransducers * 3, 0);
+	amplitudeAdjust.assign(numTransducers, 0);
+	mappings.assign(numTransducers, 0);
+	phaseDelays.assign(numTransducers, 0);
+	driver->readParameters(transducerPositions.data(), transducerNormals.data(), mappings.data(), phaseDelays.data(), amplitudeAdjust.data(), &numDiscreteLevels);
 
 	// if (numBoards > 1) {
 	// 	bool x = disc->connect(AsierInho::BensDesign, boardIDs[0], boardIDs[1]);
@@ -89,7 +86,9 @@ int Levitator::init_driver() {
 	//}
 
 	int div = 40000 / update_rate;
+printf("got here %d", __LINE__);
 	this->sendNewDivider(div);
+printf("got here %d", __LINE__);
 
 	return 0;
 }
@@ -103,122 +102,108 @@ int Levitator::setFrameRate(int frameRate) {
 
 int Levitator::sendNewDivider(unsigned int newDivider) {
 
-
-
-	unsigned char* dividerMessage = new unsigned char[2 * 256 * numBoards];
-	//memset(dividerMessage, 0, 512 * numBoards * sizeof(unsigned char));
-
-	memcpy(&dividerMessage[0], &phases_disc[0], 256 * sizeof(unsigned char)); //Bottom phase 
-	memcpy(&dividerMessage[256], &amplitudes_disc[0], 256 * sizeof(unsigned char)); //Bottom amplitude 
-	if (numBoards > 1) {
-		memcpy(&dividerMessage[2*256], &phases_disc[256], 256 * sizeof(unsigned char)); //Bottom phase 
-		memcpy(&dividerMessage[3 * 256], &amplitudes_disc[256], 256 * sizeof(unsigned char)); //Bottom amplitude 
-	}
-
+	std::vector<unsigned char> dividerMessage(2 * 256 * numBoards, 0);
 
 	for (int b = 0; b < numBoards; b++) {
+		memcpy(&dividerMessage[b*512], &phases_disc[b*256], 256 * sizeof(unsigned char));
+		memcpy(&dividerMessage[b*512 + 256], &amplitudes_disc[b*256], 256 * sizeof(unsigned char));
 		int divider = newDivider;
-		dividerMessage[512 * b + 0] = 128;
+		dividerMessage[512 * b + 0] |= 0x80;
 		
 		for (int bit = 0; bit < 8; bit++) {
-			dividerMessage[512 * b + 26 + bit] = 128 * (divider % 2);
+			dividerMessage[512 * b + 26 + bit] |= 0x80 * (divider % 2);
 			divider /= 2;
 		}
-		dividerMessage[512 * b + 34] = 128;
+		dividerMessage[512 * b + 34] |= 0x80;
 	}
-	driver->updateMessage(dividerMessage);
-	delete[] dividerMessage;
+	driver->updateMessage(dividerMessage.data());
+printf("got here %d", __LINE__);
 	return 0;
 
 }
 
 
-int Levitator::sendMessages(float* phases, float* amplitudes, float relative_amp, int num_geometriesIn, int sleep_ms, bool loop, int num_loops) {
+int Levitator::sendMessages(float* phases, float* amplitudes, float relative_amp, int num_geometriesIn, [[maybe_unused]] int sleep_ms, bool loop, int num_loops) {
 	num_geometries = num_geometriesIn;
 	//unsigned char phases_disc[512], amplitudes_disc[512];
 
-	int numUpdateGeometries = 32;
-	if (num_geometries < numUpdateGeometries) {
-		numUpdateGeometries = num_geometries;
+	int num_geometries_per_package = 32;
+	if (num_geometries < num_geometries_per_package) {
+		num_geometries_per_package = num_geometries;
 	}
 
 	// See Bk2. Pg 70
-	int number_of_packages = num_geometries / numUpdateGeometries;
-	if (number_of_packages * numUpdateGeometries < num_geometries) {
+	int number_of_packages = num_geometries / num_geometries_per_package;
+	if (number_of_packages * num_geometries_per_package < num_geometries) {
 		number_of_packages++;
 	}
 
-	//unsigned char* messages = new unsigned char[2 * numUpdateGeometries * number_of_packages * numTransducers];
-	unsigned char* messages = new unsigned char[2 * num_geometries * (256 * numBoards)];
-	unsigned char* initMessage = new unsigned char[2 * (256 * numBoards)];
+	std::vector<unsigned char> messages;
+	std::vector<unsigned char> initMessage;
+	messages.reserve(2 * num_geometries * (256 * numBoards));
+	initMessage.reserve(2 * (256 * numBoards));
 
 	int geometry = 0;
+printf("got here %d", __LINE__);
 	for (int p = 0; p < number_of_packages; p++) { //iterate over the packages to send at once
-		int numGeometriesPerPackage = std::min(numUpdateGeometries, num_geometries - geometry);
-		for (int g = 0; g < numGeometriesPerPackage; g++) { //
-			driver->discretizePhases(&(phases[geometry * numTransducers]), phases_disc);
+		int package_starting_index = p * num_geometries_per_package * 512 * numBoards;
+		int num_geometries_in_this_package = std::min(num_geometries_per_package, num_geometries - geometry);
+		for (int g = 0; g < num_geometries_in_this_package; g++) { //
+			driver->discretizePhases(&(phases[geometry * numTransducers]), phases_disc.data());
 			if (amplitudes) {
-				driver->discretizeAmplitudes(&(amplitudes[geometry * numTransducers]), amplitudes_disc);
-				driver->correctPhasesShift(phases_disc, amplitudes_disc);
+				driver->discretizeAmplitudes(&(amplitudes[geometry * numTransducers]), amplitudes_disc.data());
+				driver->correctPhasesShift(phases_disc.data(), amplitudes_disc.data());
 			}
 			else {
 				unsigned char disc_amp = driver->_discretizeAmplitude(relative_amp);
-				memset(amplitudes_disc, disc_amp, numTransducers * sizeof(unsigned char));
+				amplitudes_disc.assign(numTransducers, disc_amp);
 			}
-
-			int package_index = p * 2 * numUpdateGeometries * 256 * numBoards;
-			memcpy(&messages[package_index + 256 * 2 * g], &phases_disc[0], (256 * sizeof(unsigned char))); //Bottom phase 
-			memcpy(&messages[package_index + 256 * 2 * g + 256], &amplitudes_disc[0], (256 * sizeof(unsigned char))); //Bottom amplitude 
-			messages[package_index + (256 * 2) * g] += 128;
-
-			if (numBoards > 1) {
-				memcpy(&messages[package_index + (256 * 2) * (numGeometriesPerPackage + g)], &phases_disc[256], 256 * sizeof(unsigned char)); //Top phase
-				memcpy(&messages[package_index + (256 * 2) * (numGeometriesPerPackage + g) + 256], &amplitudes_disc[256], 256 * sizeof(unsigned char));//Top amplitude
-
-				messages[package_index + (256 * 2) * (numGeometriesPerPackage + g)] += 128;
+printf("got here %d", __LINE__);
+			size_t len_per_board = 512 * num_geometries_in_this_package;
+			for(int board = 0; board < numBoards; board++){
+				size_t message_start_index = package_starting_index + board * len_per_board + 512 * g;
+				memcpy(&messages[message_start_index], &phases_disc[256 * board], (256 * sizeof(unsigned char)));
+				memcpy(&messages[message_start_index + 256], &amplitudes_disc[256 * board], (256 * sizeof(unsigned char)));
+				messages[message_start_index] |= 0x80;
 			}
-
 
 			if (p == 0 && g == 0) { // Added by Ryuji
-				memcpy(&initMessage[0], &phases_disc[0], (256 * sizeof(unsigned char))); //Bottom phase 
-				memcpy(&initMessage[256], &amplitudes_disc[0], (256 * sizeof(unsigned char))); //Bottom amplitude 
-				initMessage[0] += 128;
-				if (numBoards > 1) {
-					memcpy(&initMessage[2*256 ], &phases_disc[256], (256 * sizeof(unsigned char))); //Bottom phase 
-					memcpy(&initMessage[3 * 256], &amplitudes_disc[256], (256 * sizeof(unsigned char))); //Bottom amplitude 
-					initMessage[256 * numBoards] += 128;
-				}
-				
-				
+				for(int b = 0; b < numBoards; b++){
+					memcpy(&initMessage[512 * b], &phases_disc[256 * b], (256 * sizeof(unsigned char)));
+					memcpy(&initMessage[512 * b + 256], &amplitudes_disc[256 * b], (256 * sizeof(unsigned char)));
+					initMessage[512 * b] |= 0x80;
+				}				
 			}
+
 			geometry++;
 		}
 	}
 	
-
+printf("got here %d", __LINE__);
 	driver->updateMessage(&initMessage[0]);
 
 
-	unsigned long waitingPeriod = numUpdateGeometries * (1000000 / update_rate);
-	unsigned long lastUpdate = microTimer::uGetTime();
-	unsigned long currentTime = lastUpdate;
+	// unsigned long waitingPeriod = num_geometries_per_package * (1000000 / update_rate);
+	// unsigned long lastUpdate = microTimer::uGetTime();
+	// unsigned long currentTime = lastUpdate;
 	unsigned long start = microTimer::uGetTime();
 
 	bool in_loop = false;
 	int l = 0;
 	if (num_loops > 0) { loop = true; }
 	while (loop || !in_loop) {
-		for (int g = 0; g < num_geometries; g += numUpdateGeometries) {
+printf("got here %d", __LINE__);
+		for (int g = 0; g < num_geometries; g += num_geometries_per_package) {
 			// wait a while 
 			/*do {
 				currentTime = microTimer::uGetTime();
 			} while (currentTime - lastUpdate < waitingPeriod);*/
 			// send messages to the boards
-			int numMessagesToSend = std::min(numUpdateGeometries, num_geometries - g);
+			int numMessagesToSend = std::min(num_geometries_per_package, num_geometries - g);
 			driver->updateMessages(&messages[2 * g * numTransducers], numMessagesToSend);
-			waitingPeriod = numMessagesToSend * (1000000 / update_rate);
+			// waitingPeriod = numMessagesToSend * (1000000 / update_rate);
 			// get the current time
-			lastUpdate = microTimer::uGetTime();
+			// lastUpdate = microTimer::uGetTime();
 		}
 		in_loop = true;
 		l++;
@@ -231,6 +216,7 @@ int Levitator::sendMessages(float* phases, float* amplitudes, float relative_amp
 }
 
 int Levitator::TurnOff() {
+printf("got here %d", __LINE__);
 	driver->turnTransducersOff();
 	return 0;
 }
@@ -249,14 +235,13 @@ extern "C" {
 		
 		lev->init_driver();
 		return lev;
-		//return new Levitator;
 	}
 
 	__attribute__((visibility("default"))) int send_message (void* levitator_ptr, float* phases, float* amplitudes, float relative_amp, int num_geometries, int sleep_ms, bool loop, int num_loops) {
 		try
 		{
-			Levitator* leviator = reinterpret_cast<Levitator*>(levitator_ptr);
-			return leviator->sendMessages(phases, amplitudes, relative_amp, num_geometries,sleep_ms,loop, num_loops);
+			Levitator* levitator = reinterpret_cast<Levitator*>(levitator_ptr);
+			return levitator->sendMessages(phases, amplitudes, relative_amp, num_geometries,sleep_ms,loop, num_loops);
 		}
 		catch (...)
 		{
@@ -268,8 +253,10 @@ extern "C" {
 		{
 			try
 			{
-				Levitator* leviator = reinterpret_cast<Levitator*>(levitator_ptr);
-				return leviator->Disconnect();
+				Levitator* levitator = reinterpret_cast<Levitator*>(levitator_ptr);
+				int ret = levitator->Disconnect();
+				delete levitator;
+				return ret;
 			}
 			catch (...)
 			{
@@ -282,8 +269,8 @@ extern "C" {
 		{
 			try
 			{
-				Levitator* leviator = reinterpret_cast<Levitator*>(levitator_ptr);
-				return leviator->TurnOff();
+				Levitator* levitator = reinterpret_cast<Levitator*>(levitator_ptr);
+				return levitator->TurnOff();
 			}
 			catch (...)
 			{
@@ -296,8 +283,8 @@ extern "C" {
 		{
 			try
 			{
-				Levitator* leviator = reinterpret_cast<Levitator*>(levitator_ptr);
-				return leviator->setFrameRate(frame_rate);
+				Levitator* levitator = reinterpret_cast<Levitator*>(levitator_ptr);
+				return levitator->setFrameRate(frame_rate);
 			}
 			catch (...)
 			{
