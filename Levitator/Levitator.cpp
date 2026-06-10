@@ -86,9 +86,7 @@ int Levitator::init_driver() {
 	//}
 
 	int div = 40000 / update_rate;
-printf("got here %d", __LINE__);
 	this->sendNewDivider(div);
-printf("got here %d", __LINE__);
 
 	return 0;
 }
@@ -117,7 +115,6 @@ int Levitator::sendNewDivider(unsigned int newDivider) {
 		dividerMessage[512 * b + 34] |= 0x80;
 	}
 	driver->updateMessage(dividerMessage.data());
-printf("got here %d", __LINE__);
 	return 0;
 
 }
@@ -144,7 +141,6 @@ int Levitator::sendMessages(float* phases, float* amplitudes, float relative_amp
 	initMessage.reserve(2 * (256 * numBoards));
 
 	int geometry = 0;
-printf("got here %d", __LINE__);
 	for (int p = 0; p < number_of_packages; p++) { //iterate over the packages to send at once
 		int package_starting_index = p * num_geometries_per_package * 512 * numBoards;
 		int num_geometries_in_this_package = std::min(num_geometries_per_package, num_geometries - geometry);
@@ -158,7 +154,6 @@ printf("got here %d", __LINE__);
 				unsigned char disc_amp = driver->_discretizeAmplitude(relative_amp);
 				amplitudes_disc.assign(numTransducers, disc_amp);
 			}
-printf("got here %d", __LINE__);
 			size_t len_per_board = 512 * num_geometries_in_this_package;
 			for(int board = 0; board < numBoards; board++){
 				size_t message_start_index = package_starting_index + board * len_per_board + 512 * g;
@@ -179,7 +174,6 @@ printf("got here %d", __LINE__);
 		}
 	}
 	
-printf("got here %d", __LINE__);
 	driver->updateMessage(&initMessage[0]);
 
 
@@ -192,7 +186,6 @@ printf("got here %d", __LINE__);
 	int l = 0;
 	if (num_loops > 0) { loop = true; }
 	while (loop || !in_loop) {
-printf("got here %d", __LINE__);
 		for (int g = 0; g < num_geometries; g += num_geometries_per_package) {
 			// wait a while 
 			/*do {
@@ -216,7 +209,6 @@ printf("got here %d", __LINE__);
 }
 
 int Levitator::TurnOff() {
-printf("got here %d", __LINE__);
 	driver->turnTransducersOff();
 	return 0;
 }
